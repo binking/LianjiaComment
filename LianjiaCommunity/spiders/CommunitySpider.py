@@ -2,7 +2,8 @@
 import re
 import json
 import scrapy
-from scrapy_redis.spiders import RedisSpider
+import traceback
+# from scrapy_redis.spiders import RedisSpider
 from LianjiaCommunity.items import LianjiacommunityCommentItem
 from scrapy.selector import Selector
 from scrapy.http import Request
@@ -15,42 +16,12 @@ class CommunityCommentSpider(scrapy.Spider):
 # class CommunityspiderSpider(RedisSpider):
     name = 'CommunityCommentSpider'
     redis_key = 'LianjiaCommunityCommentSpider:start_urls'
-    allowed_domains = ['https://m.lianjia.com/']
+    # allowed_domains = ['https://m.lianjia.com/']
     start_urls = ['https://m.lianjia.com/bj/xiaoqu/1111027382209/dianping/?page=1&page_size=20&_t=1/']
-    COMMENT_FILE = "./LianjiaCommunity/files/lianjia_community_comment_{cid}_{date}_1.html"
-    COMMENT_JSON = "./LianjiaCommunity/files/lianjia_community_comment_{cid}_{date}_{page}.html"
-    COMMENT_URL = "https://m.lianjia.com/bj/xiaoqu/{cid}/dianping/?page=1&page_size=20&_t=1"
-    OTHER_COMMENT_URL = "https://m.lianjia.com/bj/xiaoqu/{cid}/dianping/?page={page}&page_size=20&_t=1"
-
-    def parse(self, response):
-        # print(response.body, file=open(COMMENT_FILE, 'w'))
-        current_url = response.request.url
-        community_id = re.search(r'/xiaoqu/(\d+)/dianping', current_url).group(1)
-        # if 'page=' in current_url: # not first page
-        #     page = re.search(r'page=(\d+)', current_url).group(1)
-        #     print >>open(self.COMMENT_JSON.format(cid=community_id, date=get_now(), page=page), 'w'), response.bnody
-        # else:  # first page
-        print >>open(self.COMMENT_FILE.format(cid=community_id, date=get_now()), 'w'), response.body
-        selector = Selector(response)
-        comment_list = selector.xpath('//ul[@class="comment_ul"]')
-        for li_tag in comment_list.xpath(".//li[@data-info]"):
-            comment_item = LianjiacommunityCommentItem()
-            comment_item['community_id'] = community_id
-            comment_item['comment_id'] = li_tag.xpath('@data-info').re('\d+')[0]
-            user_name = li_tag.xpath('.//p[@class="user_name"]/text()').extract()
-            comment_item['user_name'] = user_name[0].strip() if user_name else ''
-            # comment_item['user_tag'] = user_info[0].xpath('.//*[@class="identity_tag"]/text()')[0].extract()
-            comment_date = li_tag.xpath('.//*[@class="time gray"]/text()').extract()
-            comment_item['publish_date'] = comment_date[0].strip() if comment_date else ''
-            content = li_tag.xpath('.//div[@data-mark="comment_content"]/text()').extract()
-            comment_item['content'] = content[0].strip() if content else ''
-            praise = li_tag.xpath('.//*[@data-mark="praise_count"]/text()').extract()
-            comment_item['praise_count'] = int(praise[0]) if praise else 0
-            yield comment_item
-        # if "1" in comment_list.xpath("@data-info").extract():
-        next_request = Request(current_url + self.OTHER_COMMENT_URL.format(cid=community_id, page=2), callback="parse_json")
-        next_request.headers['Accept'] = "application/json"
-        yield next_request
+    COMMENT_FILE = "./LianjiaCommunity/files/lianjia_community_comment_{cid}_{date}_page_{page}.html"
+    # COMMENT_JSON = "./LianjiaCommunity/files/lianjia_community_comment_{cid}_{date}_{page}.json"
+    COMMENT_URL = "https://m.lianjia.com/bj/xiaoqu/{cid}/dianping/?page={page}&page_size=20&_t=1"
+    # OTHER_COMMENT_URL = "https://m.lianjia.com/bj/xiaoqu/{cid}/dianping/?page={page}&page_size=20&_t=1"
 
     def parse_json(self, response):
         """
@@ -58,13 +29,15 @@ class CommunityCommentSpider(scrapy.Spider):
         :param response: 
         :return: 
         """
+        # import ipdb; ipdb.set_trace()
         current_url = response.request.url
         community_id = re.search(r'/xiaoqu/(\d+)/dianping', current_url).group(1)
-        current_page = re.search(r'page=(\d+)', current_url).group(1)
+        current_page = int(re.search(r'page=(\d+)', current_url).group(1))
         print >>open(self.COMMENT_JSON.format(cid=community_id, date=get_now(), page=current_page), 'w'), response.body
         try:
             comment_data = json.loads(response.body)
         except ValueError as e:
+            traceback.print_exc()
             return
         if comment_data['errno'] != 0:
             print("Error Message From Lianjia: ", comment_data['errmsg'])
@@ -82,6 +55,34 @@ class CommunityCommentSpider(scrapy.Spider):
             next_url = self.COMMENT_URL.format(cid=community_id) + self.OTHER_COMMENT_URL.format(cid=community_id, page=current_page+1)
             next_request = Request(next_url, callback="parse_json")
             next_request.headers['Accept'] = "application/json"
+            yield next_request
+
+    def parse(self, response):
+        # print(response.body, file=open(COMMENT_FILE, 'w'))
+        current_url = response.request.url
+        community_id = re.search(r'/xiaoqu/(\d+)/dianping', current_url).group(1)
+        current_page = int(re.search(r'page=(\d+)', current_url).group(1))
+        print >>open(self.COMMENT_FILE.format(cid=community_id, date=get_now(), page=current_page), 'w'), response.body
+        selector = Selector(response)
+        comment_list = selector.xpath('//ul[@class="comment_ul"]')
+        for li_tag in comment_list.xpath(".//li[@data-info]"):
+            comment_item = LianjiacommunityCommentItem()
+            comment_item['community_id'] = community_id
+            comment_item['comment_id'] = li_tag.xpath('@data-info').re('\d+')[0]
+            user_name = li_tag.xpath('.//p[@class="user_name"]/text()').extract()
+            comment_item['user_name'] = user_name[0].strip() if user_name else ''
+            # comment_item['user_tag'] = user_info[0].xpath('.//*[@class="identity_tag"]/text()')[0].extract()
+            comment_date = li_tag.xpath('.//*[@class="time gray"]/text()').extract()
+            comment_item['publish_date'] = comment_date[0].strip() if comment_date else ''
+            content = li_tag.xpath('.//div[@data-mark="comment_content"]/text()').extract()
+            comment_item['content'] = content[0].strip() if content else ''
+            praise = li_tag.xpath('.//*[@data-mark="praise_count"]/text()').extract()
+            comment_item['praise_count'] = int(praise[0]) if praise else 0
+            yield comment_item
+        if "1" in comment_list.xpath("@data-info").extract()[0]:
+        # import ipdb; ipdb.set_trace()
+        # next_request = Request(current_url[:-1] + self.OTHER_COMMENT_URL.format(cid=community_id, page=2), callback=self.parse_json, dont_filter=True)
+            next_request = Request(self.COMMENT_URL.format(cid=community_id, page=current_page + 1), callback=self.parse)
             yield next_request
 
 """
